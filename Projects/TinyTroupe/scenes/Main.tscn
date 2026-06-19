@@ -1,0 +1,279 @@
+[gd_scene format=3 uid="uid://bh1q25i4xgdgf"]
+
+[ext_resource type="Script" uid="uid://daba7dtsunfii" path="res://scripts/main.gd" id="1_main"]
+[ext_resource type="Script" uid="uid://l5fu6by873y5" path="res://scripts/level_definition.gd" id="2_level"]
+
+[sub_resource type="RectangleShape2D" id="Rect_l1_exit"]
+size = Vector2(46, 66)
+
+[sub_resource type="RectangleShape2D" id="Rect_l1_ground01"]
+size = Vector2(330, 34)
+
+[sub_resource type="RectangleShape2D" id="Rect_l1_ground02"]
+size = Vector2(218, 34)
+
+[sub_resource type="RectangleShape2D" id="Rect_l1_ground03"]
+size = Vector2(36, 65.25)
+
+[sub_resource type="RectangleShape2D" id="Rect_l1_ground04"]
+size = Vector2(254, 34)
+
+[sub_resource type="RectangleShape2D" id="Rect_l1_ground05"]
+size = Vector2(430, 34)
+
+[sub_resource type="RectangleShape2D" id="Rect_floor"]
+size = Vector2(1600, 16)
+
+[sub_resource type="RectangleShape2D" id="Rect_l2_exit"]
+size = Vector2(46, 66)
+
+[sub_resource type="RectangleShape2D" id="Rect_l2_ground01"]
+size = Vector2(390, 34)
+
+[sub_resource type="RectangleShape2D" id="Rect_l2_ground02"]
+size = Vector2(72, 402)
+
+[sub_resource type="RectangleShape2D" id="Rect_l2_ground03"]
+size = Vector2(458, 34)
+
+[sub_resource type="RectangleShape2D" id="Rect_l2_ground04"]
+size = Vector2(70, 74)
+
+[sub_resource type="RectangleShape2D" id="Rect_l2_ground05"]
+size = Vector2(210, 34)
+
+[sub_resource type="RectangleShape2D" id="Rect_l2_ground06"]
+size = Vector2(42, 140)
+
+[sub_resource type="RectangleShape2D" id="Rect_l2_ground07"]
+size = Vector2(300, 34)
+
+[sub_resource type="RectangleShape2D" id="Rect_l3_exit"]
+size = Vector2(46, 66)
+
+[sub_resource type="RectangleShape2D" id="Rect_l3_ground01"]
+size = Vector2(336, 34)
+
+[sub_resource type="RectangleShape2D" id="Rect_l3_ground02"]
+size = Vector2(42, 278)
+
+[sub_resource type="RectangleShape2D" id="Rect_l3_ground03"]
+size = Vector2(315, 34)
+
+[sub_resource type="RectangleShape2D" id="Rect_l3_ground04"]
+size = Vector2(42, 90)
+
+[sub_resource type="RectangleShape2D" id="Rect_l3_ground05"]
+size = Vector2(300, 34)
+
+[sub_resource type="RectangleShape2D" id="Rect_l3_ground06"]
+size = Vector2(42, 244)
+
+[sub_resource type="RectangleShape2D" id="Rect_l3_ground07"]
+size = Vector2(430, 34)
+
+[node name="Main" type="Node2D" unique_id=1272357419]
+script = ExtResource("1_main")
+
+[node name="Levels" type="Node2D" parent="." unique_id=790650893]
+
+[node name="Level01_BridgeBashBridge" type="Node2D" parent="Levels" unique_id=1439423105]
+visible = false
+script = ExtResource("2_level")
+level_name = "Bridge, Bash, Bridge"
+target_saved = 9
+builders = 7
+bashers = 4
+blockers = 3
+
+[node name="Spawn" type="Marker2D" parent="Levels/Level01_BridgeBashBridge" unique_id=1532882849]
+position = Vector2(86, 176)
+
+[node name="Exit" type="Area2D" parent="Levels/Level01_BridgeBashBridge" unique_id=1263721584]
+position = Vector2(1483, 147)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Levels/Level01_BridgeBashBridge/Exit" unique_id=320558806]
+shape = SubResource("Rect_l1_exit")
+
+[node name="Terrain" type="Node2D" parent="Levels/Level01_BridgeBashBridge" unique_id=1082209011]
+
+[node name="Ground01" type="StaticBody2D" parent="Levels/Level01_BridgeBashBridge/Terrain" unique_id=106218027]
+position = Vector2(199, 197)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Levels/Level01_BridgeBashBridge/Terrain/Ground01" unique_id=378649514]
+shape = SubResource("Rect_l1_ground01")
+
+[node name="Ground02" type="StaticBody2D" parent="Levels/Level01_BridgeBashBridge/Terrain" unique_id=1752285104]
+position = Vector2(591, 197)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Levels/Level01_BridgeBashBridge/Terrain/Ground02" unique_id=1554914046]
+shape = SubResource("Rect_l1_ground02")
+
+[node name="Wall01" type="StaticBody2D" parent="Levels/Level01_BridgeBashBridge/Terrain" unique_id=1602557536]
+position = Vector2(718, 170)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Levels/Level01_BridgeBashBridge/Terrain/Wall01" unique_id=1373714789]
+position = Vector2(0, 11.375)
+shape = SubResource("Rect_l1_ground03")
+
+[node name="Ground03" type="StaticBody2D" parent="Levels/Level01_BridgeBashBridge/Terrain" unique_id=293248931]
+position = Vector2(863, 197)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Levels/Level01_BridgeBashBridge/Terrain/Ground03" unique_id=1660019823]
+shape = SubResource("Rect_l1_ground04")
+
+[node name="Ground04" type="StaticBody2D" parent="Levels/Level01_BridgeBashBridge/Terrain" unique_id=119982226]
+position = Vector2(1325, 197)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Levels/Level01_BridgeBashBridge/Terrain/Ground04" unique_id=748558864]
+shape = SubResource("Rect_l1_ground05")
+
+[node name="Floor" type="StaticBody2D" parent="Levels/Level01_BridgeBashBridge/Terrain" unique_id=927761543]
+position = Vector2(800, 712)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Levels/Level01_BridgeBashBridge/Terrain/Floor" unique_id=166138825]
+shape = SubResource("Rect_floor")
+
+[node name="Level02_GreenMine" type="Node2D" parent="Levels" unique_id=89485995]
+position = Vector2(0, 820)
+script = ExtResource("2_level")
+level_name = "The Green Mine"
+total_workers = 16
+builders = 5
+diggers = 8
+bashers = 6
+blockers = 4
+floaters = 8
+
+[node name="Spawn" type="Marker2D" parent="Levels/Level02_GreenMine" unique_id=1316669260]
+position = Vector2(96, 146)
+
+[node name="Exit" type="Area2D" parent="Levels/Level02_GreenMine" unique_id=1091529963]
+position = Vector2(1455, 581)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Levels/Level02_GreenMine/Exit" unique_id=206843054]
+shape = SubResource("Rect_l2_exit")
+
+[node name="Terrain" type="Node2D" parent="Levels/Level02_GreenMine" unique_id=421232397]
+
+[node name="Ground01" type="StaticBody2D" parent="Levels/Level02_GreenMine/Terrain" unique_id=43081441]
+position = Vector2(233, 167)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Levels/Level02_GreenMine/Terrain/Ground01" unique_id=301741917]
+shape = SubResource("Rect_l2_ground01")
+
+[node name="Wall01" type="StaticBody2D" parent="Levels/Level02_GreenMine/Terrain" unique_id=880948450]
+position = Vector2(424, 351)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Levels/Level02_GreenMine/Terrain/Wall01" unique_id=1724234131]
+shape = SubResource("Rect_l2_ground02")
+
+[node name="Ground02" type="StaticBody2D" parent="Levels/Level02_GreenMine/Terrain" unique_id=16064306]
+position = Vector2(689, 535)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Levels/Level02_GreenMine/Terrain/Ground02" unique_id=1231404596]
+shape = SubResource("Rect_l2_ground03")
+
+[node name="Wall02" type="StaticBody2D" parent="Levels/Level02_GreenMine/Terrain" unique_id=1085832071]
+position = Vector2(953, 502)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Levels/Level02_GreenMine/Terrain/Wall02" unique_id=1358505309]
+position = Vector2(0, 13)
+shape = SubResource("Rect_l2_ground04")
+
+[node name="Ground03" type="StaticBody2D" parent="Levels/Level02_GreenMine/Terrain" unique_id=297481390]
+position = Vector2(1093, 469)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Levels/Level02_GreenMine/Terrain/Ground03" unique_id=1615581214]
+position = Vector2(0, 26)
+shape = SubResource("Rect_l2_ground05")
+
+[node name="Wall03" type="StaticBody2D" parent="Levels/Level02_GreenMine/Terrain" unique_id=369974424]
+position = Vector2(1219, 518)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Levels/Level02_GreenMine/Terrain/Wall03" unique_id=270885621]
+position = Vector2(0, 30)
+shape = SubResource("Rect_l2_ground06")
+
+[node name="Ground04" type="StaticBody2D" parent="Levels/Level02_GreenMine/Terrain" unique_id=1146006434]
+position = Vector2(1390, 601)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Levels/Level02_GreenMine/Terrain/Ground04" unique_id=2106712009]
+shape = SubResource("Rect_l2_ground07")
+
+[node name="Floor" type="StaticBody2D" parent="Levels/Level02_GreenMine/Terrain" unique_id=412311943]
+position = Vector2(800, 712)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Levels/Level02_GreenMine/Terrain/Floor" unique_id=2016202810]
+shape = SubResource("Rect_floor")
+
+[node name="Level03_TwoTinyChoices" type="Node2D" parent="Levels" unique_id=933870629]
+position = Vector2(0, 1640)
+script = ExtResource("2_level")
+level_name = "Two Tiny Choices"
+target_saved = 12
+total_workers = 18
+builders = 8
+diggers = 6
+bashers = 8
+blockers = 5
+floaters = 12
+
+[node name="Spawn" type="Marker2D" parent="Levels/Level03_TwoTinyChoices" unique_id=1992700270]
+position = Vector2(82, 116)
+
+[node name="Exit" type="Area2D" parent="Levels/Level03_TwoTinyChoices" unique_id=1317041602]
+position = Vector2(1485, 519)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Levels/Level03_TwoTinyChoices/Exit" unique_id=1849230690]
+shape = SubResource("Rect_l3_exit")
+
+[node name="Terrain" type="Node2D" parent="Levels/Level03_TwoTinyChoices" unique_id=342837888]
+
+[node name="Ground01" type="StaticBody2D" parent="Levels/Level03_TwoTinyChoices/Terrain" unique_id=544309668]
+position = Vector2(204, 137)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Levels/Level03_TwoTinyChoices/Terrain/Ground01" unique_id=146799483]
+shape = SubResource("Rect_l3_ground01")
+
+[node name="Wall01" type="StaticBody2D" parent="Levels/Level03_TwoTinyChoices/Terrain" unique_id=1870948180]
+position = Vector2(393, 293)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Levels/Level03_TwoTinyChoices/Terrain/Wall01" unique_id=1389705512]
+shape = SubResource("Rect_l3_ground02")
+
+[node name="Ground02" type="StaticBody2D" parent="Levels/Level03_TwoTinyChoices/Terrain" unique_id=1631329003]
+position = Vector2(571.5, 415)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Levels/Level03_TwoTinyChoices/Terrain/Ground02" unique_id=368439726]
+shape = SubResource("Rect_l3_ground03")
+
+[node name="Wall02" type="StaticBody2D" parent="Levels/Level03_TwoTinyChoices/Terrain" unique_id=1849200847]
+position = Vector2(749, 387)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Levels/Level03_TwoTinyChoices/Terrain/Wall02" unique_id=311263161]
+shape = SubResource("Rect_l3_ground04")
+
+[node name="Ground03" type="StaticBody2D" parent="Levels/Level03_TwoTinyChoices/Terrain" unique_id=1526260072]
+position = Vector2(920, 359)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Levels/Level03_TwoTinyChoices/Terrain/Ground03" unique_id=562388289]
+shape = SubResource("Rect_l3_ground05")
+
+[node name="Wall03" type="StaticBody2D" parent="Levels/Level03_TwoTinyChoices/Terrain" unique_id=2084634028]
+position = Vector2(1091, 464)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Levels/Level03_TwoTinyChoices/Terrain/Wall03" unique_id=149166663]
+shape = SubResource("Rect_l3_ground06")
+
+[node name="Ground04" type="StaticBody2D" parent="Levels/Level03_TwoTinyChoices/Terrain" unique_id=1669373740]
+position = Vector2(1327, 569)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Levels/Level03_TwoTinyChoices/Terrain/Ground04" unique_id=1362887726]
+shape = SubResource("Rect_l3_ground07")
+
+[node name="Floor" type="StaticBody2D" parent="Levels/Level03_TwoTinyChoices/Terrain" unique_id=1074061717]
+position = Vector2(800, 712)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Levels/Level03_TwoTinyChoices/Terrain/Floor" unique_id=554422506]
+shape = SubResource("Rect_floor")
