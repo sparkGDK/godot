@@ -1,4 +1,5 @@
 Projects/**/.godot/
 Projects/**/build/
+Projects/**/android/.build_version
 Projects/**/.import/
 *.tmp

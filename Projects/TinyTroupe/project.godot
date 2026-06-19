@@ -13,6 +13,7 @@ config_version=5
 config/name="Tiny Troupe"
 run/main_scene="res://scenes/Main.tscn"
 config/features=PackedStringArray("4.7")
+config/icon="res://icon.svg"
 
 [display]
 
@@ -25,3 +26,4 @@ window/stretch/aspect="expand"
 
 textures/canvas_textures/default_texture_filter=0
 renderer/rendering_method="mobile"
+textures/vram_compression/import_etc2_astc=true

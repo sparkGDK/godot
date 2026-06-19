@@ -25,6 +25,16 @@ Deschide folderul `Godot/Projects/TinyTroupe` in Godot sau porneste scena princi
 
 Obiectivul este sa salvezi numarul cerut de omuleti inainte sa ramai fara trupa.
 
+## Android build
+
+Ruleaza:
+
+```powershell
+.\build_android_debug.ps1
+```
+
+APK-ul debug se genereaza in `build/android/TinyTroupe-debug.apk`.
+
 ## Editare niveluri
 
 Nivelurile sunt in scena principala, sub `Main/Levels`.
