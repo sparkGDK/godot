@@ -7,8 +7,9 @@ const DISCOVERY_INTERVAL := 0.45
 const DISCOVERY_SCAN_REFRESH := 5.0
 const DISCOVERY_SCAN_BATCH := 32
 const RECONNECT_DELAY := 0.9
-const MAX_CLIENTS := 1
+const MAX_CLIENTS := 64
 const NETWORK_SYNC_INTERVAL := 0.10
+const LOCAL_COOP_ID := -2
 
 const STARTING_LIVES := 3
 const AI_STARTING_HULL := 3
@@ -80,13 +81,21 @@ const ENEMY_COLORS := [
 	Color("#b694ff")
 ]
 
+const COOP_COLORS := [
+	Color("#ffcf5a"),
+	Color("#b694ff"),
+	Color("#7af0a3"),
+	Color("#ff9f69"),
+	Color("#ff5fbc"),
+	Color("#5ee7ff")
+]
+
 enum GameState { LEVEL_INTRO, PLAYING, LEVEL_BONUS, WAVE_TRANSITION, GAME_OVER }
 enum PlayMode { MENU, LOCAL, HOST, CLIENT }
 
 var state := GameState.PLAYING
 var mode := PlayMode.MENU
 var local_role := "menu"
-var right_peer_id := 0
 var client_ready := false
 var instance_id := 0
 var discovery_udp: PacketPeerUDP
@@ -99,6 +108,8 @@ var pending_status := ""
 var network_sync_timer := 0.0
 var coop_input_axis := 0.0
 var coop_input_fire := false
+var coop_ships := {}
+var next_player_slot := 2
 var rng := RandomNumberGenerator.new()
 
 var stars: Array[Dictionary] = []
@@ -112,9 +123,7 @@ var shockwaves: Array[Dictionary] = []
 var score_popups: Array[Dictionary] = []
 
 var player_pos := Vector2.ZERO
-var ai_pos := Vector2.ZERO
 var player_lives := STARTING_LIVES
-var ai_hull := AI_STARTING_HULL
 var score := 0
 var wave := 1
 var level_time_remaining := LEVEL_TIME_LIMIT
@@ -124,10 +133,7 @@ var bonus_popup_points := 0
 var bonus_popup_timer := 0.0
 
 var player_cooldown := 0.0
-var ai_cooldown := 0.0
 var player_invuln := 0.0
-var ai_invuln := 0.0
-var ai_repair_timer := 0.0
 var rapid_fire_timer := 0.0
 var shield_timer := 0.0
 var active_weapon := "standard"
@@ -199,7 +205,7 @@ func _physics_process(delta: float) -> void:
 				_show_message("Start", 0.8)
 		GameState.PLAYING:
 			_read_player(delta)
-			_update_coop_ship(delta)
+			_update_coop_ships(delta)
 			_update_enemies(delta)
 			_update_bullets(delta)
 			_update_powerups(delta)
@@ -209,7 +215,7 @@ func _physics_process(delta: float) -> void:
 			_update_level_bonus(delta)
 		GameState.WAVE_TRANSITION:
 			_read_player(delta)
-			_update_coop_ship(delta)
+			_update_coop_ships(delta)
 			_update_bullets(delta)
 			_update_powerups(delta)
 			_resolve_base_hits()
@@ -324,9 +330,14 @@ func _on_viewport_resized() -> void:
 	_layout_hud()
 	_build_starfield()
 	player_pos.x = clampf(player_pos.x, SIDE_MARGIN, _playfield_size().x - SIDE_MARGIN)
-	ai_pos.x = clampf(ai_pos.x, SIDE_MARGIN, _playfield_size().x - SIDE_MARGIN)
 	player_pos.y = _ship_y()
-	ai_pos.y = _ship_y()
+	for key in coop_ships.keys():
+		var ship: Dictionary = coop_ships[key]
+		var pos: Vector2 = ship["pos"]
+		pos.x = clampf(pos.x, SIDE_MARGIN, _playfield_size().x - SIDE_MARGIN)
+		pos.y = _ship_y()
+		ship["pos"] = pos
+		coop_ships[key] = ship
 	_layout_bases()
 
 
@@ -343,15 +354,14 @@ func _start_auto_match(status: String) -> void:
 	_ensure_discovery()
 	mode = PlayMode.MENU
 	local_role = "auto"
-	right_peer_id = 0
 	client_ready = false
 	coop_input_axis = 0.0
 	coop_input_fire = false
+	coop_ships.clear()
+	next_player_slot = 2
 	reconnect_timer = -1.0
 	pending_status = status
 	_reset_game()
-	level_intro_timer = 0.0
-	level_banner_timer = 0.0
 
 	var peer := ENetMultiplayerPeer.new()
 	var error := peer.create_server(PORT, MAX_CLIENTS)
@@ -369,12 +379,14 @@ func _start_local_coop() -> void:
 	_clear_network_peer()
 	mode = PlayMode.LOCAL
 	local_role = "local"
-	right_peer_id = 0
 	client_ready = false
 	coop_input_axis = 0.0
 	coop_input_fire = false
+	coop_ships.clear()
+	next_player_slot = 2
 	reconnect_timer = -1.0
 	_reset_game()
+	_add_coop_ship(LOCAL_COOP_ID)
 	_set_status("Coop local: P1 A/D+Space, P2 sageti+Enter")
 
 
@@ -414,7 +426,7 @@ func _poll_discovery(delta: float) -> void:
 			continue
 
 		var remote_ip := discovery_udp.get_packet_ip()
-		if mode == PlayMode.HOST and right_peer_id == 0 and remote_id < instance_id:
+		if mode == PlayMode.HOST and remote_id < instance_id:
 			_connect_to_host(remote_ip, "Gasit joc in retea")
 			return
 
@@ -426,7 +438,7 @@ func _poll_discovery(delta: float) -> void:
 
 	if discovery_timer <= 0.0:
 		discovery_timer = DISCOVERY_INTERVAL
-		if mode == PlayMode.HOST and right_peer_id == 0:
+		if mode == PlayMode.HOST:
 			_send_discovery()
 
 
@@ -532,6 +544,8 @@ func _connect_to_host(address: String, status: String) -> void:
 	mode = PlayMode.CLIENT
 	local_role = "p2"
 	client_ready = false
+	coop_ships.clear()
+	next_player_slot = 2
 	reconnect_timer = -1.0
 	_reset_game()
 	level_intro_timer = 0.0
@@ -555,31 +569,23 @@ func _on_peer_connected(id: int) -> void:
 	if id == multiplayer.get_unique_id():
 		return
 
-	if right_peer_id == 0:
-		right_peer_id = id
-		coop_input_axis = 0.0
-		coop_input_fire = false
-		_assign_role.rpc_id(id, "p2")
-		_reset_game()
-		_set_status("P2 conectat. Misiunea incepe.")
-		_push_state_once()
-	else:
-		multiplayer.multiplayer_peer.disconnect_peer(id, true)
+	var label := _add_coop_ship(id)
+	_assign_role.rpc_id(id, label.to_lower())
+	_set_status("%s conectat" % label)
+	_push_state_once()
 
 
 func _on_peer_disconnected(id: int) -> void:
-	if mode == PlayMode.HOST and id == right_peer_id:
-		right_peer_id = 0
-		coop_input_axis = 0.0
-		coop_input_fire = false
-		_reset_game()
-		_set_status("P2 deconectat, caut alt coechipier...")
+	if mode == PlayMode.HOST and coop_ships.has(id):
+		var label := _ship_label(coop_ships[id])
+		coop_ships.erase(id)
+		_set_status("%s deconectat" % label)
 
 
 func _on_connected_to_server() -> void:
 	if mode == PlayMode.CLIENT:
 		client_ready = true
-		_set_status("Conectat ca P2")
+		_set_status("Conectat la host")
 
 
 func _on_connection_failed() -> void:
@@ -594,7 +600,7 @@ func _on_server_disconnected() -> void:
 func _assign_role(role: String) -> void:
 	local_role = role
 	client_ready = true
-	_set_status("Conectat ca P2")
+	_set_status("Conectat ca %s" % role.to_upper())
 
 
 @rpc("any_peer", "unreliable")
@@ -603,9 +609,11 @@ func _submit_input(direction: float, wants_fire: bool) -> void:
 		return
 
 	var sender := multiplayer.get_remote_sender_id()
-	if sender == right_peer_id:
-		coop_input_axis = clampf(direction, -1.0, 1.0)
-		coop_input_fire = wants_fire
+	if coop_ships.has(sender):
+		var ship: Dictionary = coop_ships[sender]
+		ship["input_axis"] = clampf(direction, -1.0, 1.0)
+		ship["input_fire"] = wants_fire
+		coop_ships[sender] = ship
 
 
 @rpc("authority", "reliable")
@@ -615,9 +623,7 @@ func _sync_state(payload: Dictionary) -> void:
 
 	state = int(payload.get("state", GameState.LEVEL_INTRO))
 	player_pos = payload.get("player_pos", player_pos)
-	ai_pos = payload.get("ai_pos", ai_pos)
 	player_lives = int(payload.get("player_lives", player_lives))
-	ai_hull = int(payload.get("ai_hull", ai_hull))
 	score = int(payload.get("score", score))
 	wave = int(payload.get("wave", wave))
 	level_time_remaining = float(payload.get("level_time_remaining", level_time_remaining))
@@ -626,10 +632,7 @@ func _sync_state(payload: Dictionary) -> void:
 	bonus_popup_points = int(payload.get("bonus_popup_points", bonus_popup_points))
 	bonus_popup_timer = float(payload.get("bonus_popup_timer", bonus_popup_timer))
 	player_cooldown = float(payload.get("player_cooldown", player_cooldown))
-	ai_cooldown = float(payload.get("ai_cooldown", ai_cooldown))
 	player_invuln = float(payload.get("player_invuln", player_invuln))
-	ai_invuln = float(payload.get("ai_invuln", ai_invuln))
-	ai_repair_timer = float(payload.get("ai_repair_timer", ai_repair_timer))
 	rapid_fire_timer = float(payload.get("rapid_fire_timer", rapid_fire_timer))
 	shield_timer = float(payload.get("shield_timer", shield_timer))
 	active_weapon = str(payload.get("active_weapon", active_weapon))
@@ -646,6 +649,7 @@ func _sync_state(payload: Dictionary) -> void:
 	screen_shake = float(payload.get("screen_shake", screen_shake))
 
 	enemies = _dictionary_array(payload.get("enemies", []))
+	coop_ships = _coop_ships_from_payload(payload.get("coop_ships", []))
 	bases = _dictionary_array(payload.get("bases", []))
 	bullets = _dictionary_array(payload.get("bullets", []))
 	enemy_bullets = _dictionary_array(payload.get("enemy_bullets", []))
@@ -657,7 +661,7 @@ func _sync_state(payload: Dictionary) -> void:
 
 
 func _push_state_periodically(delta: float) -> void:
-	if mode != PlayMode.HOST or right_peer_id == 0:
+	if mode != PlayMode.HOST or coop_ships.is_empty():
 		return
 
 	network_sync_timer -= delta
@@ -667,7 +671,7 @@ func _push_state_periodically(delta: float) -> void:
 
 
 func _push_state_once() -> void:
-	if mode == PlayMode.HOST and right_peer_id != 0:
+	if mode == PlayMode.HOST and not coop_ships.is_empty():
 		_sync_state.rpc(_make_state_payload())
 
 
@@ -675,9 +679,7 @@ func _make_state_payload() -> Dictionary:
 	return {
 		"state": int(state),
 		"player_pos": player_pos,
-		"ai_pos": ai_pos,
 		"player_lives": player_lives,
-		"ai_hull": ai_hull,
 		"score": score,
 		"wave": wave,
 		"level_time_remaining": level_time_remaining,
@@ -686,10 +688,7 @@ func _make_state_payload() -> Dictionary:
 		"bonus_popup_points": bonus_popup_points,
 		"bonus_popup_timer": bonus_popup_timer,
 		"player_cooldown": player_cooldown,
-		"ai_cooldown": ai_cooldown,
 		"player_invuln": player_invuln,
-		"ai_invuln": ai_invuln,
-		"ai_repair_timer": ai_repair_timer,
 		"rapid_fire_timer": rapid_fire_timer,
 		"shield_timer": shield_timer,
 		"active_weapon": active_weapon,
@@ -705,6 +704,7 @@ func _make_state_payload() -> Dictionary:
 		"level_banner_duration": level_banner_duration,
 		"screen_shake": screen_shake,
 		"enemies": enemies,
+		"coop_ships": _coop_ships_payload(),
 		"bases": bases,
 		"bullets": bullets,
 		"enemy_bullets": enemy_bullets,
@@ -713,6 +713,100 @@ func _make_state_payload() -> Dictionary:
 		"shockwaves": shockwaves,
 		"score_popups": score_popups
 	}
+
+
+func _add_coop_ship(peer_id: int) -> String:
+	if coop_ships.has(peer_id):
+		return _ship_label(coop_ships[peer_id])
+
+	var slot := next_player_slot
+	next_player_slot += 1
+	coop_ships[peer_id] = _make_coop_ship(peer_id, slot)
+	return "P%d" % slot
+
+
+func _make_coop_ship(peer_id: int, slot: int) -> Dictionary:
+	return {
+		"peer_id": peer_id,
+		"slot": slot,
+		"pos": _coop_spawn_pos(slot),
+		"hull": AI_STARTING_HULL,
+		"cooldown": 0.0,
+		"invuln": 1.25,
+		"repair_timer": 0.0,
+		"input_axis": 0.0,
+		"input_fire": false,
+		"color_index": (slot - 2) % COOP_COLORS.size()
+	}
+
+
+func _reset_coop_ship_states() -> void:
+	for key in coop_ships.keys():
+		var ship: Dictionary = coop_ships[key]
+		var slot := int(ship.get("slot", 2))
+		ship["pos"] = _coop_spawn_pos(slot)
+		ship["hull"] = AI_STARTING_HULL
+		ship["cooldown"] = 0.0
+		ship["invuln"] = 1.25
+		ship["repair_timer"] = 0.0
+		ship["input_axis"] = 0.0
+		ship["input_fire"] = false
+		coop_ships[key] = ship
+
+
+func _coop_spawn_pos(slot: int) -> Vector2:
+	var size := _playfield_size()
+	var lane_count: int = max(2, mini(8, coop_ships.size() + 2))
+	var lane: int = (slot - 1) % lane_count
+	var t := (float(lane) + 0.5) / float(lane_count)
+	return Vector2(clampf(size.x * t, SIDE_MARGIN + SHIP_HALF_WIDTH, size.x - SIDE_MARGIN - SHIP_HALF_WIDTH), _ship_y())
+
+
+func _ship_label(ship: Dictionary) -> String:
+	return "P%d" % int(ship.get("slot", 2))
+
+
+func _coop_ship_color(ship: Dictionary) -> Color:
+	var index := int(ship.get("color_index", 0)) % COOP_COLORS.size()
+	return COOP_COLORS[index]
+
+
+func _coop_owner(peer_id: int) -> String:
+	return "peer:%d" % peer_id
+
+
+func _peer_id_from_owner(owner: String) -> int:
+	if owner.begins_with("peer:"):
+		return int(owner.replace("peer:", ""))
+	return 0
+
+
+func _bullet_owner_color(owner: String) -> Color:
+	if owner == "player":
+		return PLAYER_COLOR
+	var peer_id := _peer_id_from_owner(owner)
+	if coop_ships.has(peer_id):
+		return _coop_ship_color(coop_ships[peer_id])
+	return AI_COLOR
+
+
+func _coop_ships_payload() -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	for key in coop_ships.keys():
+		var ship: Dictionary = coop_ships[key]
+		result.append(ship.duplicate(true))
+	return result
+
+
+func _coop_ships_from_payload(value: Variant) -> Dictionary:
+	var result := {}
+	if value is Array:
+		for item in value:
+			if item is Dictionary:
+				var ship: Dictionary = item.duplicate(true)
+				var peer_id := int(ship.get("peer_id", 0))
+				result[peer_id] = ship
+	return result
 
 
 func _dictionary_array(value: Variant) -> Array[Dictionary]:
@@ -726,7 +820,7 @@ func _dictionary_array(value: Variant) -> Array[Dictionary]:
 
 
 func _match_is_active() -> bool:
-	return mode == PlayMode.LOCAL or (mode == PlayMode.HOST and right_peer_id != 0)
+	return mode == PlayMode.LOCAL or mode == PlayMode.HOST
 
 
 func _is_authoritative_game() -> bool:
@@ -758,14 +852,9 @@ func _reset_game() -> void:
 	bonus_popup_points = 0
 	bonus_popup_timer = 0.0
 	player_lives = STARTING_LIVES
-	ai_hull = AI_STARTING_HULL
 	player_pos = Vector2(size.x * 0.32, _ship_y())
-	ai_pos = Vector2(size.x * 0.70, _ship_y())
 	player_cooldown = 0.0
-	ai_cooldown = 0.2
 	player_invuln = 0.0
-	ai_invuln = 0.0
-	ai_repair_timer = 0.0
 	rapid_fire_timer = 0.0
 	shield_timer = 0.0
 	active_weapon = "standard"
@@ -784,6 +873,7 @@ func _reset_game() -> void:
 	particles.clear()
 	shockwaves.clear()
 	score_popups.clear()
+	_reset_coop_ship_states()
 	_build_bases()
 	_build_wave()
 
@@ -1008,9 +1098,7 @@ func _update_timers(delta: float) -> void:
 		level_time_remaining = maxf(0.0, level_time_remaining - delta)
 	if state != GameState.LEVEL_INTRO:
 		player_cooldown = maxf(0.0, player_cooldown - delta)
-		ai_cooldown = maxf(0.0, ai_cooldown - delta)
 		player_invuln = maxf(0.0, player_invuln - delta)
-		ai_invuln = maxf(0.0, ai_invuln - delta)
 		rapid_fire_timer = maxf(0.0, rapid_fire_timer - delta)
 		shield_timer = maxf(0.0, shield_timer - delta)
 		if weapon_timer > 0.0:
@@ -1040,31 +1128,45 @@ func _read_player(delta: float) -> void:
 		player_cooldown = PLAYER_FIRE_INTERVAL * (0.34 if rapid_fire_timer > 0.0 else 1.0)
 
 
-func _update_coop_ship(delta: float) -> void:
-	ai_pos.y = _ship_y()
+func _update_coop_ships(delta: float) -> void:
+	for key in coop_ships.keys():
+		var peer_id := int(key)
+		var ship: Dictionary = coop_ships[key]
+		var pos: Vector2 = ship["pos"]
+		pos.y = _ship_y()
 
-	if ai_repair_timer > 0.0:
-		ai_repair_timer = maxf(0.0, ai_repair_timer - delta)
-		if ai_repair_timer <= 0.0:
-			ai_hull = AI_STARTING_HULL
-			ai_invuln = 1.5
-			ai_pos.x = clampf(_playfield_size().x * 0.72, SIDE_MARGIN + SHIP_HALF_WIDTH, _playfield_size().x - SIDE_MARGIN - SHIP_HALF_WIDTH)
-			_show_message("P2 revine", 1.0)
-		return
+		ship["cooldown"] = maxf(0.0, float(ship.get("cooldown", 0.0)) - delta)
+		ship["invuln"] = maxf(0.0, float(ship.get("invuln", 0.0)) - delta)
 
-	var axis := coop_input_axis
-	var wants_fire := coop_input_fire
-	if mode == PlayMode.LOCAL:
-		axis = _axis_from_keys(KEY_LEFT, KEY_RIGHT)
-		wants_fire = _secondary_fire_pressed()
+		var repair_timer := float(ship.get("repair_timer", 0.0))
+		if repair_timer > 0.0:
+			repair_timer = maxf(0.0, repair_timer - delta)
+			ship["repair_timer"] = repair_timer
+			if repair_timer <= 0.0:
+				ship["hull"] = AI_STARTING_HULL
+				ship["invuln"] = 1.5
+				pos = _coop_spawn_pos(int(ship.get("slot", 2)))
+				_show_message("%s revine" % _ship_label(ship), 1.0)
+			ship["pos"] = pos
+			coop_ships[key] = ship
+			continue
 
-	ai_pos.x += clampf(axis, -1.0, 1.0) * AI_SPEED * delta
-	ai_pos.x = clampf(ai_pos.x, SIDE_MARGIN + SHIP_HALF_WIDTH, _playfield_size().x - SIDE_MARGIN - SHIP_HALF_WIDTH)
+		var axis := float(ship.get("input_axis", 0.0))
+		var wants_fire := bool(ship.get("input_fire", false))
+		if mode == PlayMode.LOCAL and peer_id == LOCAL_COOP_ID:
+			axis = _axis_from_keys(KEY_LEFT, KEY_RIGHT)
+			wants_fire = _secondary_fire_pressed()
 
-	if state == GameState.PLAYING and ai_cooldown <= 0.0 and wants_fire:
-		_fire_friendly(ai_pos + Vector2(0.0, -31.0), "ai")
-		var rapid_scale := 0.36 if rapid_fire_timer > 0.0 else 1.0
-		ai_cooldown = AI_FIRE_INTERVAL * rapid_scale
+		pos.x += clampf(axis, -1.0, 1.0) * AI_SPEED * delta
+		pos.x = clampf(pos.x, SIDE_MARGIN + SHIP_HALF_WIDTH, _playfield_size().x - SIDE_MARGIN - SHIP_HALF_WIDTH)
+		ship["pos"] = pos
+
+		if state == GameState.PLAYING and float(ship.get("cooldown", 0.0)) <= 0.0 and wants_fire:
+			_fire_friendly(pos + Vector2(0.0, -31.0), _coop_owner(peer_id))
+			var rapid_scale := 0.36 if rapid_fire_timer > 0.0 else 1.0
+			ship["cooldown"] = AI_FIRE_INTERVAL * rapid_scale
+
+		coop_ships[key] = ship
 
 
 func _read_network_input() -> void:
@@ -1105,79 +1207,6 @@ func _update_waiting_visuals(delta: float) -> void:
 	_update_particles(delta)
 	_update_shockwaves(delta)
 	_update_score_popups(delta)
-
-
-func _ai_desired_x() -> float:
-	var size := _playfield_size()
-	var dodge_force := 0.0
-	var has_threat := false
-
-	for bullet in enemy_bullets:
-		var pos: Vector2 = bullet["pos"]
-		var vel: Vector2 = bullet["vel"]
-		if pos.y > ai_pos.y or vel.y <= 0.0:
-			continue
-
-		var time_to_ai := (ai_pos.y - pos.y) / vel.y
-		if time_to_ai < 0.0 or time_to_ai > 0.85:
-			continue
-
-		var predicted_x := pos.x + vel.x * time_to_ai
-		var threat := 74.0 - absf(predicted_x - ai_pos.x)
-		if threat > 0.0:
-			has_threat = true
-			var side := signf(ai_pos.x - predicted_x)
-			if side == 0.0:
-				side = 1.0 if ai_pos.x > size.x * 0.5 else -1.0
-			dodge_force += side * (95.0 + threat)
-
-	if has_threat:
-		return clampf(ai_pos.x + dodge_force, SIDE_MARGIN + SHIP_HALF_WIDTH, size.x - SIDE_MARGIN - SHIP_HALF_WIDTH)
-
-	var target := _pick_ai_target()
-	var desired_x := size.x * 0.68
-	if target.has("pos"):
-		var target_pos: Vector2 = target["pos"]
-		desired_x = target_pos.x
-
-	if absf(desired_x - player_pos.x) < 86.0:
-		desired_x += 116.0 if desired_x >= player_pos.x else -116.0
-
-	return clampf(desired_x, SIDE_MARGIN + SHIP_HALF_WIDTH, size.x - SIDE_MARGIN - SHIP_HALF_WIDTH)
-
-
-func _pick_ai_target() -> Dictionary:
-	var best := {}
-	var best_score := 999999.0
-
-	for enemy in enemies:
-		var pos: Vector2 = enemy["pos"]
-		var horizontal := absf(pos.x - ai_pos.x)
-		var row_pressure := pos.y * -0.42
-		var player_overlap_penalty := 65.0 if absf(pos.x - player_pos.x) < 54.0 else 0.0
-		var score_value := horizontal + row_pressure + player_overlap_penalty
-		if score_value < best_score:
-			best_score = score_value
-			best = enemy
-
-	return best
-
-
-func _ai_can_fire() -> bool:
-	if enemies.is_empty():
-		return false
-
-	var target := _enemy_in_lane(ai_pos.x, 38.0)
-	if not target.has("pos"):
-		return false
-
-	for bullet in bullets:
-		var pos: Vector2 = bullet["pos"]
-		var owner := str(bullet["owner"])
-		if owner == "ai" and absf(pos.x - ai_pos.x) < 16.0 and pos.y > 80.0:
-			return false
-
-	return true
 
 
 func _update_enemies(delta: float) -> void:
@@ -1271,11 +1300,12 @@ func _update_powerups(delta: float) -> void:
 		powerups[i] = powerup
 
 		if pos.distance_squared_to(player_pos) <= pow(POWERUP_COLLECT_RADIUS, 2.0):
-			_collect_powerup(i, "Tu")
+			_collect_powerup(i, "Tu", 1)
 			continue
 
-		if ai_repair_timer <= 0.0 and pos.distance_squared_to(ai_pos) <= pow(POWERUP_COLLECT_RADIUS, 2.0):
-			_collect_powerup(i, "P2")
+		var collector_id := _coop_ship_at_radius(pos, POWERUP_COLLECT_RADIUS)
+		if collector_id != 0:
+			_collect_powerup(i, _ship_label(coop_ships[collector_id]), collector_id)
 
 
 func _resolve_collisions() -> void:
@@ -1413,14 +1443,14 @@ func _explode_enemy_bomb(pos: Vector2) -> void:
 	_damage_bases_in_radius(pos, ENEMY_BOMB_SPLASH_RADIUS)
 	if shield_timer > 0.0 and (
 		pos.distance_squared_to(player_pos) <= pow(ENEMY_BOMB_SPLASH_RADIUS + 24.0, 2.0)
-		or (ai_repair_timer <= 0.0 and pos.distance_squared_to(ai_pos) <= pow(ENEMY_BOMB_SPLASH_RADIUS + 24.0, 2.0))
+		or _coop_ship_at_radius(pos, ENEMY_BOMB_SPLASH_RADIUS + 24.0) != 0
 	):
 		shield_timer = maxf(0.0, shield_timer - 1.1)
 	else:
 		if player_invuln <= 0.0 and pos.distance_squared_to(player_pos) <= pow(ENEMY_BOMB_SPLASH_RADIUS, 2.0):
 			_damage_player()
-		if ai_repair_timer <= 0.0 and ai_invuln <= 0.0 and pos.distance_squared_to(ai_pos) <= pow(ENEMY_BOMB_SPLASH_RADIUS, 2.0):
-			_damage_ai()
+		for peer_id in _coop_ship_ids_in_radius(pos, ENEMY_BOMB_SPLASH_RADIUS):
+			_damage_coop_ship(peer_id)
 
 	_spawn_burst(pos, ENEMY_BULLET_COLOR, 64)
 	_spawn_shockwave(pos, ENEMY_BULLET_COLOR, ENEMY_BOMB_SPLASH_RADIUS * 1.55)
@@ -1457,7 +1487,7 @@ func _resolve_enemy_bullet_hits() -> void:
 
 		if shield_timer > 0.0 and (
 			pos.distance_squared_to(player_pos) <= pow(48.0 + (22.0 if is_bomb else 0.0), 2.0)
-			or (ai_repair_timer <= 0.0 and pos.distance_squared_to(ai_pos) <= pow(48.0 + (22.0 if is_bomb else 0.0), 2.0))
+			or _coop_ship_at_radius(pos, 48.0 + (22.0 if is_bomb else 0.0)) != 0
 		):
 			enemy_bullets.remove_at(i)
 			if is_bomb:
@@ -1477,14 +1507,16 @@ func _resolve_enemy_bullet_hits() -> void:
 			_damage_player()
 			continue
 
-		if is_bomb and ai_repair_timer <= 0.0 and ai_invuln <= 0.0 and pos.distance_squared_to(ai_pos) <= pow(ENEMY_BOMB_RADIUS + SHIP_HALF_WIDTH, 2.0):
+		var bomb_hit_peer := _coop_ship_at_radius(pos, ENEMY_BOMB_RADIUS + SHIP_HALF_WIDTH) if is_bomb else 0
+		if bomb_hit_peer != 0:
 			enemy_bullets.remove_at(i)
 			_explode_enemy_bomb(pos)
 			continue
 
-		if ai_repair_timer <= 0.0 and ai_invuln <= 0.0 and _ship_rect(ai_pos).has_point(pos):
+		var bullet_hit_peer := _coop_ship_at_point(pos)
+		if bullet_hit_peer != 0:
 			enemy_bullets.remove_at(i)
-			_damage_ai()
+			_damage_coop_ship(bullet_hit_peer)
 
 
 func _check_wave_state() -> void:
@@ -1538,7 +1570,7 @@ func _update_level_bonus(delta: float) -> void:
 
 func _fire_friendly(pos: Vector2, owner: String) -> void:
 	var weapon := active_weapon if weapon_timer > 0.0 else "standard"
-	var penalize_miss := owner == "player" or owner == "ai"
+	var penalize_miss := owner == "player" or owner.begins_with("peer:")
 	match weapon:
 		"double":
 			_spawn_friendly_bullet(pos + Vector2(-10.0, 0.0), Vector2(0.0, -FRIENDLY_BULLET_SPEED), owner, weapon, 5.5, 1, 0, 0.0, penalize_miss)
@@ -1554,7 +1586,7 @@ func _fire_friendly(pos: Vector2, owner: String) -> void:
 		_:
 			_spawn_friendly_bullet(pos, Vector2(0.0, -FRIENDLY_BULLET_SPEED), owner, weapon, 6.0, 1, 0, 0.0, penalize_miss)
 
-	var color := _weapon_color(weapon) if weapon != "standard" else (PLAYER_COLOR if owner == "player" else AI_COLOR)
+	var color := _weapon_color(weapon) if weapon != "standard" else _bullet_owner_color(owner)
 	_spawn_burst(pos + Vector2(0.0, 9.0), color, 5)
 
 
@@ -1587,7 +1619,7 @@ func _spawn_powerup(pos: Vector2, powerup_type: String) -> void:
 	_spawn_shockwave(pos, color, 34.0)
 
 
-func _collect_powerup(index: int, collector: String) -> void:
+func _collect_powerup(index: int, collector: String, collector_id: int = 1) -> void:
 	if index < 0 or index >= powerups.size():
 		return
 
@@ -1610,13 +1642,16 @@ func _collect_powerup(index: int, collector: String) -> void:
 				shield_timer = SHIELD_DURATION
 				_show_message("%s: scut activ" % collector, 1.2)
 			"repair":
-				if player_lives < STARTING_LIVES:
+				if collector_id == 1 and player_lives < STARTING_LIVES:
 					player_lives += 1
 					_show_message("%s: viata recuperata" % collector, 1.2)
+				elif collector_id != 1 and _repair_coop_ship(collector_id):
+					_show_message("%s: nava reparata" % collector, 1.2)
+				elif _repair_most_damaged_coop_ship():
+					_show_message("%s: echipa reparata" % collector, 1.2)
 				else:
-					ai_hull = mini(AI_STARTING_HULL, ai_hull + 1)
-					ai_repair_timer = 0.0
-					_show_message("%s: P2 reparat" % collector, 1.2)
+					player_lives = mini(STARTING_LIVES, player_lives + 1)
+					_show_message("%s: viata recuperata" % collector, 1.2)
 			"nova":
 				_trigger_nova(pos, collector)
 
@@ -1725,9 +1760,7 @@ func _enemy_fire() -> void:
 		if rng.randf() < 0.45:
 			return
 
-	var aim_x := player_pos.x
-	if ai_repair_timer <= 0.0 and rng.randf() < 0.46:
-		aim_x = ai_pos.x
+	var aim_x := _random_active_ship_x()
 	var drift := clampf((aim_x - pos.x) * 0.18, -76.0, 76.0)
 
 	enemy_bullets.append({
@@ -1798,19 +1831,27 @@ func _damage_player() -> void:
 		_show_message("Nava ta a fost lovita", 1.1)
 
 
-func _damage_ai() -> void:
-	ai_hull -= 1
-	ai_invuln = 1.1
-	_spawn_burst(ai_pos, AI_COLOR, 34)
-	_spawn_shockwave(ai_pos, AI_COLOR, 76.0)
+func _damage_coop_ship(peer_id: int) -> void:
+	if not coop_ships.has(peer_id):
+		return
+
+	var ship: Dictionary = coop_ships[peer_id]
+	var pos: Vector2 = ship["pos"]
+	var color := _coop_ship_color(ship)
+	ship["hull"] = int(ship.get("hull", AI_STARTING_HULL)) - 1
+	ship["invuln"] = 1.1
+	_spawn_burst(pos, color, 34)
+	_spawn_shockwave(pos, color, 76.0)
 	_kick_shake(5.6)
 
-	if ai_hull <= 0:
-		ai_hull = 0
-		ai_repair_timer = AI_REPAIR_TIME
-		_show_message("P2 in reparatii", 1.3)
+	if int(ship["hull"]) <= 0:
+		ship["hull"] = 0
+		ship["repair_timer"] = AI_REPAIR_TIME
+		_show_message("%s in reparatii" % _ship_label(ship), 1.3)
 	else:
-		_show_message("P2 lovit", 0.9)
+		_show_message("%s lovit" % _ship_label(ship), 0.9)
+
+	coop_ships[peer_id] = ship
 
 
 func _defense_breached() -> void:
@@ -2065,7 +2106,8 @@ func _draw_bullets() -> void:
 		var pos: Vector2 = bullet["pos"]
 		var owner := str(bullet["owner"])
 		var weapon := str(bullet.get("weapon", "standard"))
-		var color := _weapon_color(weapon) if weapon != "standard" else (FRIENDLY_BULLET_COLOR if owner == "player" else AI_COLOR.lightened(0.25))
+		var owner_color := _bullet_owner_color(owner)
+		var color := _weapon_color(weapon) if weapon != "standard" else owner_color.lightened(0.18)
 		var vel: Vector2 = bullet["vel"]
 		var dir := vel.normalized()
 		var side := Vector2(-dir.y, dir.x)
@@ -2131,19 +2173,38 @@ func _draw_ships() -> void:
 	if active_weapon != "standard" and weapon_timer > 0.0:
 		_draw_weapon_aura(player_draw_pos)
 	_draw_ship(player_draw_pos, PLAYER_COLOR, player_invuln, false)
-	if ai_repair_timer <= 0.0:
-		var ai_draw_pos := ai_pos + Vector2(0.0, sin(fx_time * 7.4 + 1.3) * 1.8)
-		if shield_timer > 0.0:
-			_draw_active_shield(ai_draw_pos, AI_COLOR)
-		if rapid_fire_timer > 0.0:
-			_draw_rapid_aura(ai_draw_pos, AI_COLOR)
-		if active_weapon != "standard" and weapon_timer > 0.0:
-			_draw_weapon_aura(ai_draw_pos)
-		_draw_ship(ai_draw_pos, AI_COLOR, ai_invuln, true)
-	else:
-		var alpha := 0.22 + 0.12 * sin(Time.get_ticks_msec() * 0.012)
-		draw_circle(ai_pos, 32.0, Color(AI_COLOR.r, AI_COLOR.g, AI_COLOR.b, alpha))
-		draw_arc(ai_pos, 34.0, -PI * 0.5, PI * 1.5, 36, Color(AI_COLOR.r, AI_COLOR.g, AI_COLOR.b, 0.32), 2.0)
+	_draw_ship_label(player_draw_pos, "P1", PLAYER_COLOR)
+
+	for key in coop_ships.keys():
+		var ship: Dictionary = coop_ships[key]
+		var pos: Vector2 = ship["pos"]
+		var color := _coop_ship_color(ship)
+		var label := _ship_label(ship)
+		var repair_timer := float(ship.get("repair_timer", 0.0))
+		if repair_timer <= 0.0:
+			var ai_draw_pos := pos + Vector2(0.0, sin(fx_time * 7.4 + float(ship.get("slot", 2)) * 0.7) * 1.8)
+			if shield_timer > 0.0:
+				_draw_active_shield(ai_draw_pos, color)
+			if rapid_fire_timer > 0.0:
+				_draw_rapid_aura(ai_draw_pos, color)
+			if active_weapon != "standard" and weapon_timer > 0.0:
+				_draw_weapon_aura(ai_draw_pos)
+			_draw_ship(ai_draw_pos, color, float(ship.get("invuln", 0.0)), true)
+			_draw_ship_label(ai_draw_pos, label, color)
+		else:
+			var alpha := 0.22 + 0.12 * sin(Time.get_ticks_msec() * 0.012 + float(ship.get("slot", 2)))
+			draw_circle(pos, 32.0, Color(color.r, color.g, color.b, alpha))
+			draw_arc(pos, 34.0, -PI * 0.5, PI * 1.5, 36, Color(color.r, color.g, color.b, 0.32), 2.0)
+			_draw_ship_label(pos, "%s %.0fs" % [label, repair_timer], color)
+
+
+func _draw_ship_label(pos: Vector2, text: String, color: Color) -> void:
+	var font := ThemeDB.fallback_font
+	var font_size := 14
+	var width := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1.0, font_size).x
+	var label_pos := pos + Vector2(-width * 0.5, -42.0)
+	draw_string(font, label_pos + Vector2(1.0, 1.0), text, HORIZONTAL_ALIGNMENT_LEFT, -1.0, font_size, Color(0.0, 0.0, 0.0, 0.68))
+	draw_string(font, label_pos, text, HORIZONTAL_ALIGNMENT_LEFT, -1.0, font_size, color.lightened(0.28))
 
 
 func _draw_ship(pos: Vector2, color: Color, invuln: float, is_ai: bool) -> void:
@@ -2252,6 +2313,81 @@ func _draw_score_popups() -> void:
 		draw_string(font, pos + Vector2(-width * 0.5, 0.0), text, HORIZONTAL_ALIGNMENT_LEFT, -1.0, font_size, Color(color.r, color.g, color.b, alpha))
 
 
+func _coop_ship_at_radius(pos: Vector2, radius: float) -> int:
+	for key in coop_ships.keys():
+		var ship: Dictionary = coop_ships[key]
+		if _coop_ship_is_repairing_or_invulnerable(ship):
+			continue
+		var ship_pos: Vector2 = ship["pos"]
+		if ship_pos.distance_squared_to(pos) <= pow(radius, 2.0):
+			return int(key)
+	return 0
+
+
+func _coop_ship_ids_in_radius(pos: Vector2, radius: float) -> Array[int]:
+	var result: Array[int] = []
+	for key in coop_ships.keys():
+		var ship: Dictionary = coop_ships[key]
+		if _coop_ship_is_repairing_or_invulnerable(ship):
+			continue
+		var ship_pos: Vector2 = ship["pos"]
+		if ship_pos.distance_squared_to(pos) <= pow(radius, 2.0):
+			result.append(int(key))
+	return result
+
+
+func _coop_ship_at_point(pos: Vector2) -> int:
+	for key in coop_ships.keys():
+		var ship: Dictionary = coop_ships[key]
+		if _coop_ship_is_repairing_or_invulnerable(ship):
+			continue
+		var ship_pos: Vector2 = ship["pos"]
+		if _ship_rect(ship_pos).has_point(pos):
+			return int(key)
+	return 0
+
+
+func _coop_ship_is_repairing_or_invulnerable(ship: Dictionary) -> bool:
+	return float(ship.get("repair_timer", 0.0)) > 0.0 or float(ship.get("invuln", 0.0)) > 0.0
+
+
+func _random_active_ship_x() -> float:
+	var targets: Array[float] = [player_pos.x]
+	for key in coop_ships.keys():
+		var ship: Dictionary = coop_ships[key]
+		if float(ship.get("repair_timer", 0.0)) > 0.0:
+			continue
+		var pos: Vector2 = ship["pos"]
+		targets.append(pos.x)
+	return targets[rng.randi_range(0, targets.size() - 1)]
+
+
+func _repair_coop_ship(peer_id: int) -> bool:
+	if not coop_ships.has(peer_id):
+		return false
+	var ship: Dictionary = coop_ships[peer_id]
+	var hull := int(ship.get("hull", AI_STARTING_HULL))
+	if hull >= AI_STARTING_HULL and float(ship.get("repair_timer", 0.0)) <= 0.0:
+		return false
+	ship["hull"] = mini(AI_STARTING_HULL, hull + 1)
+	ship["repair_timer"] = 0.0
+	ship["invuln"] = maxf(float(ship.get("invuln", 0.0)), 0.75)
+	coop_ships[peer_id] = ship
+	return true
+
+
+func _repair_most_damaged_coop_ship() -> bool:
+	var best_id := 0
+	var best_hull := AI_STARTING_HULL + 1
+	for key in coop_ships.keys():
+		var ship: Dictionary = coop_ships[key]
+		var hull := int(ship.get("hull", AI_STARTING_HULL))
+		if hull < best_hull or float(ship.get("repair_timer", 0.0)) > 0.0:
+			best_hull = hull
+			best_id = int(key)
+	return best_id != 0 and _repair_coop_ship(best_id)
+
+
 func _ship_rect(pos: Vector2) -> Rect2:
 	return Rect2(pos - Vector2(SHIP_HALF_WIDTH, SHIP_HALF_HEIGHT), Vector2(SHIP_HALF_WIDTH * 2.0, SHIP_HALF_HEIGHT * 2.0))
 
@@ -2351,25 +2487,24 @@ func _refresh_hud() -> void:
 		timer_label.text = "BONUS %s" % _format_time(bonus_time_remaining)
 	else:
 		timer_label.text = _format_time(level_time_remaining)
+	var player_count := 1 + coop_ships.size()
 	lives_label.text = "Vieti %d  Val %d" % [maxi(player_lives, 0), wave]
 
-	if mode == PlayMode.HOST and right_peer_id == 0:
-		ai_label.text = "P2 asteptare LAN"
-	elif mode == PlayMode.CLIENT:
-		ai_label.text = "P2 CLIENT"
-	elif ai_repair_timer > 0.0:
-		ai_label.text = "P2 reparatii %.1fs" % ai_repair_timer
+	if mode == PlayMode.CLIENT:
+		ai_label.text = "%s CLIENT  Nave %d" % [local_role.to_upper(), player_count]
+	elif mode == PlayMode.HOST:
+		ai_label.text = "HOST  Nave %d" % player_count
+	elif mode == PlayMode.LOCAL:
+		ai_label.text = "LOCAL  Nave %d" % player_count
 	else:
-		ai_label.text = "P2 hull %d" % ai_hull
+		ai_label.text = "Caut LAN"
 
 	if state == GameState.GAME_OVER:
 		status_label.text = "Misiune pierduta"
 	elif mode == PlayMode.MENU:
 		status_label.text = "Caut coechipier in LAN..."
-	elif mode == PlayMode.HOST and right_peer_id == 0:
-		status_label.text = "Host P1: asteapta P2 in LAN"
 	elif mode == PlayMode.CLIENT and not client_ready:
-		status_label.text = "P2: conectare..."
+		status_label.text = "Conectare..."
 	elif message_timer > 0.0:
 		status_label.text = message
 	elif rapid_fire_timer > 0.0 or shield_timer > 0.0 or (active_weapon != "standard" and weapon_timer > 0.0):
@@ -2384,9 +2519,9 @@ func _refresh_hud() -> void:
 	elif mode == PlayMode.LOCAL:
 		status_label.text = "Coop local"
 	elif mode == PlayMode.CLIENT:
-		status_label.text = "P2 conectat"
+		status_label.text = "%s conectat" % local_role.to_upper()
 	elif mode == PlayMode.HOST:
-		status_label.text = "P1 HOST + P2 LAN"
+		status_label.text = "P1 HOST - altii pot intra oricand"
 	else:
 		status_label.text = "Coop network"
 
