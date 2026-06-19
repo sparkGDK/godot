@@ -1,0 +1,4 @@
+.godot/
+.appdata/
+export/
+*.tmp

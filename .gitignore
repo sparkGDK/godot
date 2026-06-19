@@ -1,0 +1,4 @@
+Projects/**/.godot/
+Projects/**/build/
+Projects/**/.import/
+*.tmp
